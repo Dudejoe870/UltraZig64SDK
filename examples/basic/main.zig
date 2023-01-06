@@ -1,6 +1,6 @@
-pub const libultrazig = @import("libultrazig");
+pub const n64 = @import("libultrazig");
 comptime {
-    _ = libultrazig;
+    _ = n64;
 }
 
 pub export fn main() void {

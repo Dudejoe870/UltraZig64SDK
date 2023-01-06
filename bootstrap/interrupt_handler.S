@@ -8,36 +8,35 @@
 
 #include "regs.S"
 
-    .section .text, "ax"
-	.align 5
-inthandler:
-	.global inthandler
+	.global interrupt_handler
 
 	.set noat
 	.set noreorder
 
-# The exception stack contains a dump of all GPRs/FPRs. This requires 544 bytes.
-# On top of that, we need 32 bytes of empty space at offset 0-31, because
-# that is required by MIPS ABI when calling C functions (it's a space called
-# "argument slots" -- even if the function takes no arguments, or are only passed in 
-# registers, the ABI requires reserving that space and called functions might
-# use it to store local variables).
-# So we keep 0-31 empty, and we start saving GPRs from 32, and then FPR. See
-# the other macros to see the actual layout.
-#
-# *NOTE*: this layout is also exposed in Zig via RegBlock in exception.zig
-# Please keep in sync!
+	# The exception stack contains a dump of all GPRs/FPRs. This requires 544 bytes.
+	# On top of that, we need 32 bytes of empty space at offset 0-31, because
+	# that is required by MIPS ABI when calling C functions (it's a space called
+	# "argument slots" -- even if the function takes no arguments, or are only passed in 
+	# registers, the ABI requires reserving that space and called functions might
+	# use it to store local variables).
+	# So we keep 0-31 empty, and we start saving GPRs from 32, and then FPR. See
+	# the other macros to see the actual layout.
+	#
+	# *NOTE*: this layout is also exposed in Zig via RegBlock in exception.zig
+	# Please keep in sync!
 
-#define EXC_STACK_SIZE (544+32)
-#define STACK_GPR      32
-#define STACK_HI     (STACK_GPR+(32*8))
-#define STACK_LO     (STACK_HI+8)
-#define STACK_SR     (STACK_LO+8)
-#define STACK_CR     (STACK_SR+4)
-#define STACK_EPC    (STACK_CR+4)
-#define STACK_FC31   (STACK_EPC+4)
-#define STACK_FPR    (STACK_FC31+4)
+	#define EXC_STACK_SIZE (544+32)
+	#define STACK_GPR      32
+	#define STACK_HI     (STACK_GPR+(32*8))
+	#define STACK_LO     (STACK_HI+8)
+	#define STACK_SR     (STACK_LO+8)
+	#define STACK_CR     (STACK_SR+4)
+	#define STACK_EPC    (STACK_CR+4)
+	#define STACK_FC31   (STACK_EPC+4)
+	#define STACK_FPR    (STACK_FC31+4)
 
+	.align 4
+interrupt_handler:
 	addiu sp, -EXC_STACK_SIZE
 
 	# Save caller-saved GPRs only. These are the only
@@ -91,10 +90,10 @@ inthandler:
 	sw cause, STACK_CR(sp)
 
 	andi t0, cause, 0xff
-	beqz t0, interrupt
+	beqz t0, .Linterrupt$
 	nop
-
-exception:
+	
+.Lexception$:
 	# This is an exception, not an interrupt. We want to save the full processor
 	# state in the exception frame, so all registers including FPU regs.
 	# Make sure FPU is activated in this context. It could be deactivated if
@@ -104,28 +103,26 @@ exception:
 	mtc0 t0, C0_SR
 
 	# Save the callee-saved FPU regs
-	jal save_fpu_regs
+	jal .Lsave_fpu_regs$
 	move a0, sp
 
 	# Save all the CPU+FPU caller-saved regs, which are normally
 	# not saved for an interrupt.
-	jal finalize_exception_frame
+	jal .Lfinalize_exception_frame$
 	nop
 
 	# Check the exception type
 	andi t0, cause, CAUSE_EXC_MASK
-	bne t0, CAUSE_EXC_COPROCESSOR, critical_exception
+	bne t0, CAUSE_EXC_COPROCESSOR, .Lcritical_exception$
 	nop
-
-exception_coprocessor:
+.Lexception_coprocessor$:
 	# Extract CE bits (28..29) from CR
 	srl t0, cause, 28
 	andi t0, 3
 	# If == 1 (COP1), it is an FPU exception
-	bne t0, 1, critical_exception
+	bne t0, 1, .Lcritical_exception$
 	nop
-
-exception_coprocessor_fpu:
+.Lexception_coprocessor_fpu$:
 	# FPU exception. This happened because of the use of FPU in an interrupt handler,
 	# where it is disabled by default. We must save the full FPU context,
 	# reactivate the FPU, and then return from exception, so that the FPU instruction
@@ -139,24 +136,22 @@ exception_coprocessor_fpu:
 	# Save the FPU registers into the *underlying* interrupt context.
 	# That is, we want to make sure that they get restored when the
 	# underlying interrupt exits.
-	jal save_fpu_regs
-	lw a0, interrupt_exception_frame
+	jal .Lsave_fpu_regs$
+	lw a0, .Linterrupt_exception_frame$
 
 	# OK we are done. We can now exit the exception
-	j end_interrupt
+	j .Lend_interrupt$
 	nop
-
-critical_exception:
+.Lcritical_exception$:
 	# Exception not specially handled.
 	addiu a0, sp, 32
     la t2, __onCriticalException
 	jalr t2
 	nop
 
-	j end_interrupt
+	j .Lend_interrupt$
 	nop
-
-interrupt:
+.Linterrupt$:
 	# This is an interrupt. 
 	# First of all, disable FPU coprocessor so that we can avoid saving FPU
 	# registers altogether.
@@ -171,11 +166,11 @@ interrupt:
 	# to store the current stack pointer somewhere.
 	# Notice that interrupts cannot be reentrant (only exceptions are), so
 	# a single variable will suffice.
-	sw sp, interrupt_exception_frame
+	sw sp, .Linterrupt_exception_frame$
 
 	# check for "pre-NMI" (reset)
 	andi t0, cause, 0x1000
-	beqz t0, notprenmi
+	beqz t0, .Lnotprenmi$
 	nop
 
 	# handle reset
@@ -195,16 +190,16 @@ interrupt:
 
 	# Reload cause register (might be reused by C code) and test for other interrupts
 	lw cause, STACK_CR(sp)
-notprenmi:
+.Lnotprenmi$:
 	# check for count=compare
 	and t0, cause, 0x8000
-	beqz t0,notcount
+	beqz t0, .Lnotcount$
 	nop
 	# Writing C0_COMPARE acknowledges the timer interrupt (clear the interrupt
 	# bit in C0_CAUSE, otherwise the interrupt would retrigger). We write
 	# the current value so that we don't destroy it in case it's needed.
-	mfc0 t0,C0_COMPARE
-	mtc0 t0,C0_COMPARE
+	mfc0 t0, C0_COMPARE
+	mtc0 t0, C0_COMPARE
 
 	# handle timer interrupt
     la t2, __TI_handler
@@ -213,10 +208,9 @@ notprenmi:
 
 	# Reload cause register (might be reused by C code) and test for other interrupts
 	lw cause, STACK_CR(sp)
-
-notcount:
+.Lnotcount$:
 	and t0, cause, 0x800
-	beqz t0, notcart
+	beqz t0, .Lnotcart$
 	nop
 
 	# handle CART interrupt
@@ -226,8 +220,7 @@ notcount:
 
 	# Reload cause register (might be reused by C code) and test for other interrupts
 	lw cause, STACK_CR(sp)
-
-notcart:
+.Lnotcart$:
 	# pass anything else along to MI (RCP) handler
     la t2, __MI_handler
 	jalr t2
@@ -235,11 +228,10 @@ notcart:
 
 	# No more interrupts to process, we can exit
 	# (fallthrough)
-
-end_interrupt:
+.Lend_interrupt$:
 	mfc0 t0, C0_SR
 	and t0, SR_CU1
-	beqz t0, end_interrupt_gpr
+	beqz t0, .Lend_interrupt_gpr$
 	nop
 
 	ldc1 $f0, (STACK_FPR+ 0*8)(sp)
@@ -265,8 +257,7 @@ end_interrupt:
 
 	lw t0, STACK_FC31(sp)
 	ctc1 t0, $31
-
-end_interrupt_gpr:
+.Lend_interrupt_gpr$:
 	# Restore SR. This also disables reentrant exceptions by
 	# restoring the EXL bit into SR
 	.set noat
@@ -302,8 +293,8 @@ end_interrupt_gpr:
 	addiu sp, EXC_STACK_SIZE
 	eret
 
-	.align 5
-finalize_exception_frame:
+	.align 4
+.Lfinalize_exception_frame$:
 	sd $16,(STACK_GPR+16*8)(sp)   # S0
 	sd $17,(STACK_GPR+17*8)(sp)   # S1
 	sd $18,(STACK_GPR+18*8)(sp)   # S2
@@ -333,8 +324,8 @@ finalize_exception_frame:
 	jr ra
 	nop
 
-	.align 5
-save_fpu_regs:
+	.align 4
+.Lsave_fpu_regs$:
 	cfc1 $1, $31
 	sw $1, STACK_FC31(a0)
 	sdc1 $f0, (STACK_FPR+ 0*8)(a0)
@@ -362,4 +353,4 @@ save_fpu_regs:
 
 	.section .bss
  	.align 8
-	.lcomm interrupt_exception_frame, 4
+	.lcomm .Linterrupt_exception_frame$, 4

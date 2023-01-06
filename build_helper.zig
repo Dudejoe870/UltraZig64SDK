@@ -14,8 +14,8 @@ pub const target = std.zig.CrossTarget {
 pub fn addRomElf(b: *Builder, comptime rom_name: []const u8, root_src: []const u8) *std.build.LibExeObjStep {
     var step = b.addExecutable(rom_name ++ ".elf", root_src);
     step.setTarget(target);
-    step.addPackagePath("libultrazig", "libultrazig/libultrazig.zig");
+    step.addPackagePath("libultrazig", "libultrazig/lib.zig");
     step.setLinkerScriptPath(std.build.FileSource.relative("rom.ld"));
-    step.addCSourceFiles(&[_][]const u8 { "entry.S", "inthandler.S" }, &[_][]const u8 { });
+    step.addCSourceFiles(&[_][]const u8 { "bootstrap/entry.S", "bootstrap/interrupt_handler.S" }, &[_][]const u8 { });
     return step;
 }

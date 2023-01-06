@@ -1,4 +1,4 @@
-// Kept in sync with inthandler.S
+// Kept in sync with interrupt_handler.S
 pub const RegBlock = extern struct {
     gpr: [32]u64,
     hi: u64,
@@ -28,10 +28,10 @@ fn defaultExceptionHandler(exception: ExceptionInfo) void {
     }
 }
 
-pub export fn __onCriticalException(regs: *RegBlock) void {
+export fn __onCriticalException(regs: *RegBlock) void {
     exception_handler(ExceptionInfo.create(regs));
 }
 
-pub export fn __onResetException(regs: *RegBlock) void {
+export fn __onResetException(regs: *RegBlock) void {
     _ = regs;
 }

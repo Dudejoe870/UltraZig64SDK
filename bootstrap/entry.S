@@ -9,27 +9,27 @@
 	.section .boot, "ax"
 	.global _start
 _start:
-	lw t0, 0x80000318 # memory size
+	lw t0, 0x80000318 # Get memory size
 
 	li t1, 0x7FFFFFF0
-	addu sp, t0, t1 # init stack
-	la gp, _gp # init data pointer
+	addu sp, t0, t1 # Init stack
+	la gp, _gp # Init data pointer
 
-    # magic N64 hardware init
+    # Magic N64 hardware init
 	li v0, 8
 	sw v0, 0xBFC007FC
 
-	# a bit from libgloss so we start at a known state
+	# Put us into a known state
 	li v0, SR_CU1|SR_PE|SR_FR|SR_KX|SR_SX|SR_UX
 	mtc0 v0, C0_SR
 	mtc0 zero, C0_CAUSE
 
-	# copy code and data via DMA
+	# Copy code and data via DMA
 	la a0, __text_start
 	la a1, __data_end
 	la t0, __ultrazig_text_start
-	subu a2, a0, t0 # skip over .boot section
-	addu a2, 0x10001000 # address in rom
+	subu a2, a0, t0 # Skip over .boot section
+	addu a2, 0x10001000 # Address in rom
 
 	# Start PI DMA transfer
 	lui t0, 0xA460
@@ -39,45 +39,45 @@ _start:
 	addi t1, -1
 	sw t1, 0x0C(t0)
 
-	# fill .bss with 0s
-	la a0, __bss_start
-	or a0, 0x20000000
-	la a1, __bss_end
-	or a1, 0x20000000
-bss_init:
-	sw zero, (a0)
-	addiu a0, 4
-	bltu a0, a1, bss_init
-	nop
+	# Fill .bss with 0s
+		la a0, __bss_start
+		or a0, 0x20000000
+		la a1, __bss_end
+		or a1, 0x20000000
+	0:
+		sw zero, (a0)
+		addiu a0, 4
+		bltu a0, a1, 0b
+		nop
 
 	# Wait for DMA transfer to be finished
-	lui t0, 0xA460
-wait_dma_end:
-	lw t1, 0x10(t0)
-	andi t1, 3
-	bnez t1, wait_dma_end
-	nop
+		lui t0, 0xA460
+	0:
+		lw t1, 0x10(t0)
+		andi t1, 3
+		bnez t1, 0b
+		nop
 
-	# load interrupt vector
-	la t0, intvector
-	la t1, 0xA0000000
-	la t2, INT_VECTOR_INSTRUCTION_COUNT
-loadintvectorloop:
-	lw t3, (t0)
-	sw t3, (t1)
-	sw t3, 0x80(t1)
-	sw t3, 0x100(t1)
-	sw t3, 0x180(t1)
-	
-	cache HIT_INVALIDATE_I, (t1)
-	cache HIT_INVALIDATE_I, 0x80(t1)
-	cache HIT_INVALIDATE_I, 0x100(t1)
-	cache HIT_INVALIDATE_I, 0x180(t1)
-	addi t0, 4
-	addi t1, 4
-	addiu t2, -1
-	bnez t2,loadintvectorloop
-	nop
+	# Load interrupt vector
+		la t0, interrupt_vector
+		la t1, 0xA0000000
+		la t2, INT_VECTOR_INSTRUCTION_COUNT
+	0:
+		lw t3, (t0)
+		sw t3, (t1)
+		sw t3, 0x80(t1)
+		sw t3, 0x100(t1)
+		sw t3, 0x180(t1)
+		
+		cache HIT_INVALIDATE_I, (t1)
+		cache HIT_INVALIDATE_I, 0x80(t1)
+		cache HIT_INVALIDATE_I, 0x100(t1)
+		cache HIT_INVALIDATE_I, 0x180(t1)
+		addi t0, 4
+		addi t1, 4
+		addiu t2, -1
+		bnez t2, 0b
+		nop
 
     # Set FS bit to allow flashing of denormalized floats
 	# The FPU inside the N64 CPU does not implement denormalized floats
@@ -91,13 +91,16 @@ loadintvectorloop:
     or t0, t1
     ctc1 t0, $31
 
-	jal main # call main app
-    nop
-deadloop:
-	b deadloop
+	jal __systemInit # Initialize the main part of the libultrazig library.
 	nop
 
-intvector:
-	la k1, inthandler
+	jal main # call main app
+    nop
+0:
+	b 0b
+	nop
+
+interrupt_vector:
+	la k1, interrupt_handler
 	jr k1
 	nop
